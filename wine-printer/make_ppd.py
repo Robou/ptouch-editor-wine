@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""Génère le PPD PostScript utilisé par Wine (wineps) pour l'imprimante « Brother PT-P700 ».
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Robou
+"""Generate the PostScript PPD that Wine (wineps) uses for the "Brother PT-P700" printer.
 
-But : que Wine présente à P-touch Editor les mêmes caractéristiques que le pilote Windows
-Brother : 180 dpi, et les mêmes identifiants de papier (dmPaperSize). Wine numérote les formats
-inconnus à partir de 256 (DMPAPER_USER) dans l'ordre du PPD ; on insère donc des formats
-« réservés » pour que chaque ruban tombe sur l'identifiant Brother.
+Goal: make Wine present P-touch Editor with the same characteristics as Brother's Windows driver:
+180 dpi, and the same paper IDs (dmPaperSize). Wine numbers unknown page sizes from 256
+(DMPAPER_USER) in PPD order, so "reserved" sizes are inserted until each tape lands on its
+Brother ID.
 """
 import sys
 
 DPI = 180
-FEED_DOTS = 14          # marge mini en tête/queue d'étiquette (2 mm)
+FEED_DOTS = 14          # minimum margin at each end of a label (2 mm)
 DEFAULT_LEN_DOTS = 709  # 100 mm
 
-# id Brother (dmPaperSize), nom, largeur ruban (points d'impression), zone imprimable (points)
+# Brother ID (dmPaperSize), name, tape width (dots), printable width (dots)
 TAPES = [
     (263, '3.5 mm', 24, 24), (257, '6 mm', 42, 32), (258, '9 mm', 64, 50),
     (259, '12 mm', 84, 70), (260, '18 mm', 128, 112), (261, '24 mm', 170, 128),
@@ -24,11 +26,11 @@ TAPES = [
     (418, 'HS 17.7 mm', 126, 106), (423, 'HS 21.0 mm', 148, 120), (419, 'HS 23.6 mm', 168, 128),
 ]
 DEFAULT_ID = 261
-EPS = 0.01          # en points d'impression
+EPS = 0.01          # in dots
 
 
 def tape(pid):
-    """(nom, largeur en 1/10 mm, longueur par défaut en 1/10 mm) d'un ruban."""
+    """(name, width in 1/10 mm, default length in 1/10 mm) of a tape."""
     for t in TAPES:
         if t[0] == pid:
             return t[1], round(t[2] * 254.0 / DPI), round(DEFAULT_LEN_DOTS * 254.0 / DPI)
@@ -41,7 +43,7 @@ def pt(dots):
 
 def main(out, default_id=DEFAULT_ID):
     by_id = {t[0]: t for t in TAPES}
-    pages = []  # (clé, libellé, largeur, zone)
+    pages = []  # (key, label, width, printable width)
     for pid in range(256, max(by_id) + 1):
         if pid in by_id:
             _, name, w, area = by_id[pid]
@@ -53,7 +55,7 @@ def main(out, default_id=DEFAULT_ID):
     L = DEFAULT_LEN_DOTS
     o = []
     o.append('*PPD-Adobe: "4.3"')
-    o.append('*%% PPD pour Wine (wineps) : imite le pilote Windows Brother PT-P700.')
+    o.append('*%% PPD for Wine (wineps): imitates the Brother PT-P700 Windows driver.')
     o.append('*FormatVersion: "4.3"')
     o.append('*FileVersion: "1.0"')
     o.append('*LanguageVersion: English')
@@ -78,8 +80,8 @@ def main(out, default_id=DEFAULT_ID):
     o.append('*Resolution %ddpi/%d dpi: "<</HWResolution[%d %d]>>setpagedevice"' % (DPI, DPI, DPI, DPI))
     o.append('*CloseUI: *Resolution')
     o.append('')
-    # Sans option Duplex, wineps efface DM_DUPLEX du DEVMODE qu'il enregistre, puis le rejette
-    # au démarrage suivant et repart de ses valeurs d'usine (300 dpi).
+    # Without a Duplex option, wineps clears DM_DUPLEX in the DEVMODE it stores, then rejects that
+    # DEVMODE at the next start and falls back on its built-in defaults (300 dpi).
     o.append('*OpenUI *Duplex/Duplex: PickOne')
     o.append('*DefaultDuplex: None')
     o.append('*Duplex None/Off: ""')
@@ -102,7 +104,7 @@ def main(out, default_id=DEFAULT_ID):
     o.append('*DefaultImageableArea: ' + default)
     for key, name, w, area in pages:
         m = (w - area) / 2.0
-        # + EPS : wineps tronque la conversion points -> pixels ; sans cela 2,8 pt donne 6 px et non 7
+        # + EPS: wineps truncates when converting points to pixels; without it 2.8 pt gives 6 px, not 7
         o.append('*ImageableArea %s/%s: "%s %s %s %s"' % (key, name, pt(m + EPS), pt(FEED_DOTS + EPS),
                                                        pt(m + area + EPS), pt(L - FEED_DOTS + EPS)))
     o.append('')
@@ -111,7 +113,7 @@ def main(out, default_id=DEFAULT_ID):
         o.append('*PaperDimension %s/%s: "%s %s"' % (key, name, pt(w), pt(L)))
     o.append('')
     open(out, 'w', encoding='latin-1').write('\n'.join(o) + '\n')
-    print('écrit', out, '(%d formats)' % len(pages))
+    print('wrote', out, '(%d page sizes)' % len(pages))
 
 
 if __name__ == '__main__':

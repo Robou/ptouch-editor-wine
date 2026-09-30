@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Reçoit sur son entrée standard le PostScript émis par Wine pour l'imprimante « Brother PT-P700 »
-(P-touch Editor 6), le rastérise à 180 dpi et l'envoie à l'étiqueteuse en commandes raster Brother
-(« Raster Command Reference PT-H500/P700/E500 »).
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Robou
+"""Read on standard input the PostScript that Wine emits for the "Brother PT-P700" printer
+(P-touch Editor 6), rasterise it at 180 dpi and send it to the label printer as Brother raster
+commands ("Raster Command Reference PT-H500/P700/E500").
 
-Géométrie : la page PostScript a pour largeur la largeur du ruban et pour hauteur la longueur de
-l'étiquette. Chaque rangée de pixels de la page devient une ligne raster (une colonne de 128 points
-de la tête). Le bas de la page sort en premier : c'est le bord gauche d'une étiquette « paysage ».
+Geometry: the PostScript page is as wide as the tape and as tall as the label is long. Each row of
+page pixels becomes one raster line (one column of the 128 print head pins). The bottom of the page
+comes out first: that is the left edge of a "landscape" label.
 
-usage : ptp700-print [options] < travail.ps
+usage: ptp700-print [options] < job.ps
 """
 import argparse, glob, os, re, subprocess, sys, time, zipfile
 
@@ -19,7 +21,7 @@ DPI = make_ppd.DPI
 FEED = make_ppd.FEED_DOTS
 STATE = os.path.join(os.environ.get('XDG_STATE_HOME', os.path.expanduser('~/.local/state')), 'ptp700')
 
-# identifiant Brother du ruban -> largeur annoncée à l'imprimante (mm)
+# Brother tape ID -> width announced to the printer (mm)
 MEDIA = {263: 4, 257: 6, 258: 9, 259: 12, 260: 18, 261: 24,
          415: 6, 416: 9, 417: 12, 418: 18, 419: 24}
 
@@ -31,9 +33,9 @@ def log(msg):
 
 
 def die(msg):
-    log('ERREUR : ' + msg)
-    sys.stderr.write('ptp700-print : %s\n' % msg)
-    # une notification de bureau : sous Wine, personne ne lit la sortie d'erreur
+    log('ERROR: ' + msg)
+    sys.stderr.write('ptp700-print: %s\n' % msg)
+    # a desktop notification: under Wine nobody reads standard error
     try:
         subprocess.call(['notify-send', '-i', 'printer-error', 'Brother PT-P700', msg],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -48,22 +50,22 @@ def job_info(ps):
     head = ps[:20000].decode('latin-1', 'replace')
     m = re.search(r'\*PageSize p(\d+)', head) or re.search(r'media=p(\d+)', head)
     if not m:
-        die("format de ruban introuvable dans le travail d'impression (PPD inattendu ?)")
+        die('no tape format found in the print job (unexpected PPD?)')
     c = re.search(r'%cupsJobTicket: copies=(\d+)', head)
     t = re.search(r'%%Title: (.*)', head)
     return int(m.group(1)), int(c.group(1)) if c else 1, t.group(1).strip() if t else ''
 
 
 def rasterize(ps):
-    """Rend le PostScript avec Ghostscript ; renvoie une liste de pages (largeur, rangées 0/1)."""
+    """Render the PostScript with Ghostscript; return a list of pages (width, rows of 0/1)."""
     try:
         p = subprocess.run(['gs', '-q', '-dBATCH', '-dNOPAUSE', '-dSAFER', '-r%d' % DPI,
                             '-sDEVICE=pbmraw', '-sOutputFile=-', '-'],
                            input=ps, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError:
-        die('Ghostscript (gs) est introuvable')
+        die('Ghostscript (gs) not found')
     if p.returncode:
-        die('Ghostscript a échoué : ' + p.stderr.decode('utf-8', 'replace')[-300:])
+        die('Ghostscript failed: ' + p.stderr.decode('utf-8', 'replace')[-300:])
     data, pos, pages = p.stdout, 0, []
     while pos < len(data):
         m = re.compile(rb'P4\s+(?:#[^\n]*\n\s*)*(\d+)\s+(\d+)\s').match(data, pos)
@@ -79,18 +81,18 @@ def rasterize(ps):
         pos += h * stride
         pages.append((w, rows))
     if not pages:
-        die("Ghostscript n'a produit aucune page")
+        die('Ghostscript produced no page')
     return pages
 
 
-# --------------------------------------------------------------------------- longueur d'étiquette
+# --------------------------------------------------------------------------- label length
 
 def lbx_length():
-    """P-touch Editor enregistre une copie de l'étiquette (.lbx) juste avant d'imprimer. On y lit
-    la longueur voulue : renvoie (auto, longueur en points d'impression) ou None."""
+    """P-touch Editor saves a copy of the label (.lbx) right before printing. Read the intended
+    length from it: return (auto, length in dots) or None."""
     prefix = os.environ.get('WINEPREFIX', os.path.expanduser('~/.wine'))
     files = []
-    for appdata in ('AppData/Roaming', 'Application Data'):   # selon l'âge du préfixe Wine
+    for appdata in ('AppData/Roaming', 'Application Data'):   # depends on the age of the Wine prefix
         files += glob.glob(os.path.join(prefix, 'drive_c/users/*', appdata, 'Brother/P-touchEditor6/Printed/*.lbx'))
     files = [f for f in files if time.time() - os.path.getmtime(f) < 120]
     if not files:
@@ -101,29 +103,29 @@ def lbx_length():
         auto = re.search(r'autoLength="(\w+)"', paper).group(1) == 'true'
         height = float(re.search(r'height="([\d.]+)pt"', paper).group(1))
         return auto, int(round(height * DPI / 72.0))
-    except Exception as e:  # format .lbx inattendu : on retombera sur la détection du contenu
-        log('lecture .lbx impossible : %r' % e)
+    except Exception as e:  # unexpected .lbx format: fall back on trimming to the content
+        log('cannot read .lbx: %r' % e)
         return None
 
 
 def label_lines(rows, mode, fixed_dots):
-    """rows : rangées de la zone imprimable dans l'ordre de sortie. Renvoie celles à imprimer."""
+    """rows: rows of the printable area, in the order they come out. Return those to print."""
     inked = [i for i, r in enumerate(rows) if any(r)]
     if not inked:
-        die('étiquette vide : rien à imprimer')
+        die('empty label: nothing to print')
     if mode == 'fixed':
         n = max(1, min(len(rows), fixed_dots - 2 * FEED))
         if inked[-1] >= n:
-            log('attention : le contenu dépasse la longueur fixe demandée, étiquette allongée')
+            log('warning: content exceeds the requested fixed length, label extended')
             n = inked[-1] + 1
         return rows[:n]
     if mode == 'auto':
-        # longueur automatique : marge de fin égale à la marge de début
+        # automatic length: trailing margin equal to the leading margin
         return rows[:min(len(rows), inked[-1] + 1 + inked[0])]
     return rows
 
 
-# --------------------------------------------------------------------------- commandes raster
+# --------------------------------------------------------------------------- raster commands
 
 def packbits(line):
     out, i, n = bytearray(), 0, len(line)
@@ -140,12 +142,12 @@ def packbits(line):
             j += 1
         out += bytes([j - i]) + line[i:j + 1]
         i = j + 1
-    # la référence Brother impose de ne jamais dépasser la ligne brute précédée de sa longueur
+    # Brother's reference: never exceed the raw line preceded by its length
     return bytes(out) if len(out) <= n else bytes([n - 1]) + line
 
 
 def raster_line(row, area, mirror):
-    """Place la zone imprimable, centrée, sur les 128 points de la tête (bit de poids fort d'abord)."""
+    """Centre the printable area on the 128 head pins (most significant bit first)."""
     px = row[::-1] if mirror else row
     line = bytearray(PINS // 8)
     off = (PINS - area) // 2
@@ -158,18 +160,18 @@ def raster_line(row, area, mirror):
 
 def build_job(labels, tape_id, autocut, chain, check_tape):
     width_mm = MEDIA[tape_id]
-    out = bytearray(b'\x00' * 100)               # invalidation
-    out += b'\x1b@'                              # initialisation
+    out = bytearray(b'\x00' * 100)               # invalidate
+    out += b'\x1b@'                              # initialise
     for n, lines in enumerate(labels):
-        out += b'\x1bia\x01'                     # mode raster
+        out += b'\x1bia\x01'                     # raster mode
         flags = 0x80 | (0x04 if check_tape else 0)
-        # type de support non imposé (0) : seul le contrôle de largeur est demandé
+        # media type left unspecified (0): only the width check is requested
         out += b'\x1biz' + bytes([flags, 0, width_mm, 0]) \
             + len(lines).to_bytes(4, 'little') + bytes([0 if n == 0 else 1, 0])
-        out += b'\x1biM' + bytes([0x40 if autocut else 0])   # le miroir est fait ici, pas par l'imprimante
+        out += b'\x1biM' + bytes([0x40 if autocut else 0])   # mirroring is done here, not by the printer
         out += b'\x1biK' + bytes([0 if chain else 0x08])
         out += b'\x1bid' + FEED.to_bytes(2, 'little')
-        out += b'M\x02'                          # compression TIFF (PackBits)
+        out += b'M\x02'                          # TIFF (PackBits) compression
         for line in lines:
             if not any(line):
                 out += b'Z'
@@ -180,10 +182,10 @@ def build_job(labels, tape_id, autocut, chain, check_tape):
     return bytes(out)
 
 
-# --------------------------------------------------------------------------- aperçu et envoi
+# --------------------------------------------------------------------------- preview and sending
 
 def write_preview(labels, path):
-    """Image PBM de ce qui est envoyé à la tête : une colonne par ligne raster."""
+    """PBM image of what is sent to the print head: one column per raster line."""
     lines = [l for lab in labels for l in lab + [bytes(PINS // 8)] * 8]
     w, h = len(lines), PINS
     stride = (w + 7) // 8
@@ -200,7 +202,7 @@ def send(job, a):
     if a.output:
         with open(a.output, 'wb') as f:
             f.write(job)
-        return 'fichier ' + a.output
+        return 'file ' + a.output
     dev = a.device or next((d for d in sorted(glob.glob('/dev/usb/lp*')) if os.access(d, os.W_OK)), None)
     if dev:
         with open(dev, 'wb', buffering=0) as f:
@@ -209,24 +211,24 @@ def send(job, a):
     p = subprocess.run(['lp', '-d', a.queue, '-o', 'raw', '-t', 'P-touch Editor'], input=job,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if p.returncode:
-        die("envoi à la file CUPS « %s » impossible : %s" % (a.queue, p.stderr.decode('utf-8', 'replace').strip()))
-    return 'file CUPS %s (%s)' % (a.queue, p.stdout.decode('utf-8', 'replace').strip())
+        die('cannot send to CUPS queue "%s": %s' % (a.queue, p.stderr.decode('utf-8', 'replace').strip()))
+    return 'CUPS queue %s (%s)' % (a.queue, p.stdout.decode('utf-8', 'replace').strip())
 
 
 def main():
     env = os.environ.get
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    ap.add_argument('--queue', default=env('PTP700_QUEUE', 'PT-P700'), help='file CUPS utilisée en mode brut')
-    ap.add_argument('--device', default=env('PTP700_DEVICE'), help='périphérique direct, ex. /dev/usb/lp0')
-    ap.add_argument('--output', default=env('PTP700_OUTPUT'), help="écrire les commandes dans un fichier au lieu d'imprimer")
+    ap.add_argument('--queue', default=env('PTP700_QUEUE', 'PT-P700'), help='CUPS queue, used in raw mode')
+    ap.add_argument('--device', default=env('PTP700_DEVICE'), help='write to a device instead, e.g. /dev/usb/lp0')
+    ap.add_argument('--output', default=env('PTP700_OUTPUT'), help='write the commands to a file instead of printing')
     ap.add_argument('--length', default=env('PTP700_LENGTH', 'lbx'),
-                    help="longueur : « lbx » (celle du fichier d'étiquette), « auto », « page » ou une valeur en mm")
-    ap.add_argument('--no-cut', action='store_true', default=env('PTP700_NO_CUT') == '1', help='pas de coupe automatique')
+                    help='label length: "lbx" (follow the label file), "auto", "page", or a value in mm')
+    ap.add_argument('--no-cut', action='store_true', default=env('PTP700_NO_CUT') == '1', help='no automatic cut')
     ap.add_argument('--chain', action='store_true', default=env('PTP700_CHAIN') == '1',
-                    help="impression en chaîne : pas d'avance ni de coupe après la dernière étiquette")
-    ap.add_argument('--mirror', action='store_true', default=env('PTP700_MIRROR') == '1', help='impression miroir')
+                    help='chain printing: no feed and cut after the last label')
+    ap.add_argument('--mirror', action='store_true', default=env('PTP700_MIRROR') == '1', help='mirror printing')
     ap.add_argument('--no-tape-check', action='store_true', default=env('PTP700_NO_TAPE_CHECK') == '1',
-                    help="ne pas demander à l'imprimante de vérifier la largeur du ruban")
+                    help='do not ask the printer to check the tape width')
     a = ap.parse_args()
 
     ps = sys.stdin.buffer.read()
@@ -236,7 +238,7 @@ def main():
 
     tape_id, copies, title = job_info(ps)
     if tape_id not in MEDIA:
-        die("le format %d (impression sur plusieurs bandes) n'est pas pris en charge" % tape_id)
+        die('format %d (printing across several strips) is not supported' % tape_id)
     name = make_ppd.tape(tape_id)[0]
     width, area = next((t[2], t[3]) for t in make_ppd.TAPES if t[0] == tape_id)
 
@@ -250,9 +252,9 @@ def main():
     labels = []
     for w, rows in rasterize(ps):
         if w != width:
-            die('largeur de page inattendue : %d points au lieu de %d pour le ruban %s' % (w, width, name))
+            die('unexpected page width: %d dots instead of %d for %s tape' % (w, width, name))
         m = (width - area) // 2
-        printable = [r[m:m + area] for r in rows[FEED:len(rows) - FEED]][::-1]   # bas de page en premier
+        printable = [r[m:m + area] for r in rows[FEED:len(rows) - FEED]][::-1]   # bottom of the page first
         lines = [raster_line(r, area, a.mirror) for r in label_lines(printable, mode, fixed)]
         labels += [lines] * copies
 
@@ -261,7 +263,7 @@ def main():
     with open(os.path.join(STATE, 'last-job.bin'), 'wb') as f:
         f.write(job)
     dest = send(job, a)
-    log('« %s » : ruban %s, %d étiquette(s), %s mm, longueur %s -> %s'
+    log('"%s": %s tape, %d label(s), %s mm, length %s -> %s'
         % (title, name, len(labels), '+'.join('%.1f' % ((len(l) + 2 * FEED) * 25.4 / DPI) for l in labels), mode, dest))
 
 

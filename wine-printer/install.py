@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Déclare dans un préfixe Wine une imprimante « Brother PT-P700 » que P-touch Editor 6 reconnaît.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Robou
+"""Register in a Wine prefix a "Brother PT-P700" printer that P-touch Editor 6 recognises.
 
-P-touch Editor identifie ses imprimantes par le *nom du pilote* Windows. Wine ne sait pas charger
-le pilote Brother ; on enregistre donc une imprimante portant ce nom, adossée au pilote PostScript
-générique de Wine (wineps) et à un PPD qui imite le pilote Brother (180 dpi, identifiants de ruban).
-Le flux PostScript produit est remis à une commande Linux (port redirigé) qui se charge de
-l'envoyer à l'étiqueteuse.
+P-touch Editor identifies its printers by the Windows *driver name*. Wine cannot load Brother's
+driver, so we register a printer carrying that name, backed by Wine's generic PostScript driver
+(wineps) and a PPD that imitates Brother's driver (180 dpi, tape IDs). The PostScript it produces
+is handed to a Linux command (redirected port) that sends it to the label printer.
 
-usage : install.py [--tape ID] [--spool COMMANDE] [--uninstall]
+usage: install.py [--tape ID] [--spool COMMAND] [--uninstall]
 """
 import argparse, os, shutil, struct, subprocess, sys, tempfile
 
@@ -22,21 +23,21 @@ ENVS = {'Windows NT x86': 'w32x86', 'Windows x64': 'x64'}
 
 
 def devmode(tape_id):
-    """DEVMODEA public seul (dmDriverExtra = 0) : wineps complète sa partie privée depuis le PPD.
-    Tous les champs de son DEVMODE par défaut doivent être marqués présents, sinon il l'ignore."""
+    """Public DEVMODEA only (dmDriverExtra = 0): wineps fills in its private part from the PPD.
+    Every field of its default DEVMODE must be flagged as present, otherwise it ignores ours."""
     name, width, length = make_ppd.tape(tape_id)
-    fields = 0x1ff1f  # orientation, papier, longueur, largeur, échelle, copies, bac, qualité,
-                      # couleur, recto-verso, résolution Y, TrueType, assemblage, nom du format
+    fields = 0x1ff1f  # orientation, paper, length, width, scale, copies, source, quality,
+                      # colour, duplex, Y resolution, TrueType, collate, form name
     b = struct.pack('<32sHHHHI', NAME.encode('ascii'), 0x30a, 1, 156, 0, fields)
     b += struct.pack('<13h',
-                     2,              # dmOrientation : paysage, comme le pilote Brother
-                     tape_id,        # dmPaperSize : identifiant Brother du ruban
+                     2,              # dmOrientation: landscape, like Brother's driver
+                     tape_id,        # dmPaperSize: Brother tape ID
                      length, width,  # 1/10 mm
-                     100, 1,         # échelle, copies
-                     7,              # dmDefaultSource : automatique
+                     100, 1,         # scale, copies
+                     7,              # dmDefaultSource: automatic
                      make_ppd.DPI,   # dmPrintQuality
-                     1,              # dmColor : monochrome
-                     1,              # dmDuplex : recto
+                     1,              # dmColor: monochrome
+                     1,              # dmDuplex: simplex
                      make_ppd.DPI,   # dmYResolution
                      3,              # dmTTOption
                      0)              # dmCollate
@@ -68,7 +69,7 @@ def reg_install(tape_id, spool):
           '"Location"=""',
           '"Name"="%s"' % NAME,
           '"Parameters"=""',
-          '"Port"="%s"' % PORT,   # ni « CUPS: » ni « LPR: » : Wine ne la supprime pas au démarrage
+          '"Port"="%s"' % PORT,   # neither "CUPS:" nor "LPR:": Wine does not delete it at startup
           '"Print Processor"="wineps"',
           '"Printer Driver"="%s"' % NAME,
           '"Priority"=dword:00000000',
@@ -80,7 +81,7 @@ def reg_install(tape_id, spool):
           '"UntilTime"=dword:00000000', '',
           r'[HKEY_CURRENT_USER\Software\Wine\Printing\Spooler]',
           '"%s"="|%s"' % (PORT, spool.replace('\\', '\\\\').replace('"', '\\"')), '',
-          # tables « win.ini » : c'est là que CreateDC trouve le pilote GDI d'une imprimante
+          # "win.ini" tables: this is where CreateDC looks up a printer's GDI driver
           '[HKEY_CURRENT_USER\\%s\\Devices]' % WININI,
           '"%s"="wineps.drv,%s"' % (NAME, PORT), '',
           '[HKEY_CURRENT_USER\\%s\\PrinterPorts]' % WININI,
@@ -111,10 +112,10 @@ def regedit(lines):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--tape', type=int, default=258,
-                    help='identifiant du ruban par défaut (257=6 mm, 258=9 mm, 259=12 mm, 260=18 mm, 261=24 mm)')
+                    help='default tape ID (257=6 mm, 258=9 mm, 259=12 mm, 260=18 mm, 261=24 mm)')
     ap.add_argument('--spool', default=os.path.join(HERE, 'ptp700-print'),
-                    help='commande Linux qui reçoit le PostScript sur son entrée standard')
-    ap.add_argument('--uninstall', action='store_true')
+                    help='Linux command that receives the PostScript on its standard input')
+    ap.add_argument('--uninstall', action='store_true', help='remove the printer from the Wine prefix')
     a = ap.parse_args()
 
     prefix = os.environ.get('WINEPREFIX', os.path.expanduser('~/.wine'))
@@ -126,7 +127,7 @@ def main():
             p = os.path.join(drivers, d, '3', NAME + '.ppd')
             if os.path.exists(p):
                 os.unlink(p)
-        print('imprimante « %s » retirée de %s (rc=%d)' % (NAME, prefix, rc))
+        print('printer "%s" removed from %s (rc=%d)' % (NAME, prefix, rc))
         return rc
 
     ppd = os.path.join(HERE, NAME + '.ppd')
@@ -135,7 +136,7 @@ def main():
         os.makedirs(os.path.join(drivers, d, '3'), exist_ok=True)
         shutil.copy(ppd, os.path.join(drivers, d, '3'))
     rc = regedit(reg_install(a.tape, a.spool))
-    print('imprimante « %s » installée dans %s (ruban par défaut : %s, rc=%d)'
+    print('printer "%s" installed in %s (default tape: %s, rc=%d)'
           % (NAME, prefix, make_ppd.tape(a.tape)[0], rc))
     return rc
 

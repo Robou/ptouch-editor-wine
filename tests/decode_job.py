@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Décode un flux de commandes raster PT-P700 (tel que produit par ptp700-print) et le décrit.
-Sert à vérifier un travail sans imprimante : decode_job.py travail.bin [aperçu.pbm]"""
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Robou
+"""Decode a PT-P700 raster command stream (as produced by ptp700-print) and describe it.
+For checking a job without a printer: decode_job.py job.bin [preview.pbm]"""
 import sys
 
 def unpack(d):
@@ -17,30 +19,30 @@ def decode(b):
     i = 0
     while i < len(b) and b[i] == 0:
         i += 1
-    print('invalidation : %d octets nuls' % i)
+    print('invalidate: %d null bytes' % i)
     pages, lines = [], []
     while i < len(b):
         c = b[i]
-        if b[i:i + 2] == b'\x1b@': print('initialisation'); i += 2
-        elif b[i:i + 3] == b'\x1bia': print('mode raster', b[i + 3]); i += 4
+        if b[i:i + 2] == b'\x1b@': print('initialise'); i += 2
+        elif b[i:i + 3] == b'\x1bia': print('raster mode', b[i + 3]); i += 4
         elif b[i:i + 3] == b'\x1biz':
             n = b[i + 3:i + 13]
-            print('infos : drapeaux=%#x type=%#x largeur=%d mm longueur=%d lignes=%d page=%d'
+            print('print info: flags=%#x type=%#x width=%d mm length=%d lines=%d page=%d'
                   % (n[0], n[1], n[2], n[3], int.from_bytes(n[4:8], 'little'), n[8])); i += 13
-        elif b[i:i + 3] == b'\x1biM': print('modes : coupe auto=%d miroir=%d' % (b[i + 3] >> 6 & 1, b[i + 3] >> 7)); i += 4
-        elif b[i:i + 3] == b'\x1biK': print('avancé : sans chaînage=%d' % (b[i + 3] >> 3 & 1)); i += 4
-        elif b[i:i + 3] == b'\x1bid': print('marge : %d points' % int.from_bytes(b[i + 3:i + 5], 'little')); i += 5
+        elif b[i:i + 3] == b'\x1biM': print('modes: auto cut=%d mirror=%d' % (b[i + 3] >> 6 & 1, b[i + 3] >> 7)); i += 4
+        elif b[i:i + 3] == b'\x1biK': print('advanced: no chain printing=%d' % (b[i + 3] >> 3 & 1)); i += 4
+        elif b[i:i + 3] == b'\x1bid': print('margin: %d dots' % int.from_bytes(b[i + 3:i + 5], 'little')); i += 5
         elif c == 0x4d: print('compression', b[i + 1]); i += 2
         elif c == 0x5a: lines.append(bytes(16)); i += 1
         elif c == 0x47:
             n = int.from_bytes(b[i + 1:i + 3], 'little'); d = unpack(b[i + 3:i + 3 + n])
-            assert len(d) == 16, 'ligne de %d octets' % len(d)
+            assert len(d) == 16, 'line of %d bytes' % len(d)
             lines.append(d); i += 3 + n
         elif c in (0x0c, 0x1a):
-            print('%s : %d lignes raster' % ('impression' if c == 0x0c else 'impression + avance', len(lines)))
+            print('%s: %d raster lines' % ('print' if c == 0x0c else 'print and feed', len(lines)))
             pages.append(lines); lines = []; i += 1
         else:
-            raise SystemExit('octet inattendu %#x à la position %d' % (c, i))
+            raise SystemExit('unexpected byte %#x at offset %d' % (c, i))
     return pages
 
 pages = decode(open(sys.argv[1], 'rb').read())
@@ -54,4 +56,4 @@ if len(sys.argv) > 2:
                 img[y * stride + (x >> 3)] |= 0x80 >> (x & 7)
     open(sys.argv[2], 'wb').write(b'P4\n%d %d\n' % (w, 128) + bytes(img))
     rows = [y for y in range(128) if any(l[y >> 3] & (0x80 >> (y & 7)) for l in lines)]
-    print('points de tête utilisés : %d à %d' % (rows[0], rows[-1]))
+    print('head pins used: %d to %d' % (rows[0], rows[-1]))
