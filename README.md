@@ -1,7 +1,7 @@
-# P-touch Editor 6 on Linux with a Brother PT-P700
+# ptouch-editor-wine: Brother P-touch Editor 6 on Linux (Wine) with a PT-P700
 
-Print from Brother's own label editor, **P-touch Editor 6**, running under Wine, to a **PT-P700**
-label printer connected to a Linux machine. No Windows virtual machine.
+Print from Brother's own label design software, P-touch Editor 6, running under Wine, to a
+PT-P700 label printer plugged into a Linux machine. No Windows virtual machine.
 
 Brother ships no Linux driver for this printer, and Wine cannot load the Windows one, so Editor
 normally reports that no printer driver is installed. This project registers a printer in Wine that
@@ -9,6 +9,22 @@ Editor accepts as a PT-P700, and converts what Editor prints into the printer's 
 commands.
 
 This is an independent project, not affiliated with or endorsed by Brother.
+
+## Is this for you?
+
+You have a Brother PT-P700, you run Linux, and you want P-touch Editor itself rather than a
+replacement. Under Wine you have probably met one of these:
+
+- Editor starts but lists no printer, or says
+  `There is no printer driver installed with this application.`
+- Editor sees a printer, then crashes when you press Print. Wine reports
+  `Unhandled exception: page fault on read access to 0x00000008`, and the log shows
+  `System.NullReferenceException` in `PtouchEditor6.Wpf.ViewModels.PrintSettingViewModel`.
+- Printing does nothing and Wine logs `err:gdi:CreateDCW no driver found for L"WINSPOOL"`.
+- You looked for a way to install Brother's Windows printer driver in Wine. There is none: Wine
+  does not load Windows printer drivers.
+
+Each of these is explained in [How it works](#how-it-works).
 
 ## Status
 
@@ -42,9 +58,10 @@ Everything outside that table is untested. Read [Limitations](#limitations) befo
 
 ## Install
 
+Clone this repository, then:
+
 ```sh
-git clone <this repository>
-cd <this repository>/wine-printer
+cd ptouch-editor-wine/wine-printer
 ./install.py
 ```
 
@@ -172,8 +189,6 @@ Ghostscript and builds the job described in Brother's
 | `tests/decode_job.py` | Decodes a raster command stream back into text and a bitmap |
 | `tests/sample-24mm-2-copies.ps` | A job captured from Editor |
 
-Code comments and messages are in French.
-
 ## Checking without a printer
 
 ```sh
@@ -193,6 +208,11 @@ the bitmap the print head would receive.
   `./install.py` with the same `WINEPREFIX` you start Editor with.
 - **Editor crashes when you press Print.** The stored settings are not at 180 dpi; run
   `./install.py` again and restart Editor.
+
+## License
+
+GPL-3.0-or-later, see [LICENSE](LICENSE). You may use, modify and redistribute this code; if you
+distribute a modified version, it must stay under the same license and credit the original.
 
 ## Related projects
 
